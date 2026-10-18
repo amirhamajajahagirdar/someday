@@ -1,0 +1,52 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { scryptSync } from 'node:crypto';
+import { createAppServer, validateLetter } from '../server.mjs';
+
+test('validates letter title, message, and a future opening date', () => {
+  assert.throws(() => validateLetter({ title: '  ', body: 'Words', open_date: '2099-05-01' }), /name/);
+  assert.throws(() => validateLetter({ title: 'Title', body: '  ', open_date: '2099-05-01' }), /message/);
+  assert.throws(() => validateLetter({ title: 'Title', body: 'Words', open_date: '2026-02-30' }), /valid opening date/);
+  assert.throws(() => validateLetter({ title: 'Title', body: 'Words', open_date: '2000-01-01' }), /future/);
+  assert.deepEqual(validateLetter({ title: '  Dear future me  ', body: '  Remember this  ', open_date: '2099-05-01' }), { title: 'Dear future me', body: 'Remember this', open_date: '2099-05-01' });
+});
+
+test('sets up SQLite, seals letters until their date, and lets the admin preview them', async t => {
+  const dir = await mkdtemp(join(tmpdir(), 'someday-test-'));
+  const adminPassword = 'Test-admin-passphrase';
+  const adminPasswordSalt = 'test-admin-salt';
+  const adminPasswordHash = scryptSync(adminPassword, adminPasswordSalt, 64).toString('hex');
+  const server = createAppServer({ dbPath: join(dir, 'data', 'test.db'), adminPasswordSalt, adminPasswordHash });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => { await new Promise(resolve => server.close(resolve)); await rm(dir, { recursive: true, force: true }); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const createdResponse = await fetch(`${base}/api/letters`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ title: 'A note for later', body: 'Keep going.', open_date: '2099-05-01' }) });
+  assert.equal(createdResponse.status, 201);
+  const created = await createdResponse.json();
+  assert.ok(created.created_at);
+  assert.equal(Object.hasOwn(created, 'body'), false);
+  const list = await (await fetch(`${base}/api/letters`)).json();
+  assert.equal(list.length, 1);
+  assert.equal(list[0].title, 'A note for later');
+  assert.equal(Object.hasOwn(list[0], 'body'), false);
+  const readable = await fetch(`${base}/api/letters/${created.id}`);
+  assert.equal(readable.status, 423);
+  assert.match((await readable.json()).error, /still sealed/);
+  assert.equal((await fetch(`${base}/api/admin/letters`)).status, 401);
+  const badLogin = await fetch(`${base}/api/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: 'wrong' }) });
+  assert.equal(badLogin.status, 401);
+  const login = await fetch(`${base}/api/admin/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ password: adminPassword }) });
+  assert.equal(login.status, 200);
+  const cookie = login.headers.get('set-cookie').split(';', 1)[0];
+  const adminResponse = await fetch(`${base}/api/admin/letters`, { headers: { cookie } });
+  assert.equal(adminResponse.status, 200);
+  const admin = await adminResponse.json();
+  assert.equal(admin.length, 1);
+  assert.equal(admin[0].body, 'Keep going.');
+  assert.ok(admin[0].created_at);
+  await fetch(`${base}/api/admin/logout`, { method: 'POST', headers: { cookie } });
+  assert.equal((await fetch(`${base}/api/admin/letters`, { headers: { cookie } })).status, 401);
+});
