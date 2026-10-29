@@ -18,7 +18,7 @@ No `npm install` is needed. Keep the launcher window open while using the app. I
 3. On another device on that Wi-Fi, open `http://YOUR-PC-IP:8000`, using the address from step 1.
 4. In Windows Defender Firewall, allow Node.js for **Private networks only**. Do not allow Public networks.
 
-Each connected device reads and writes to the same SQLite database on the server PC. New letters appear in **Your letters** with their opening dates. Letter content stays sealed for all regular visitors until that date; the `/admin` dashboard requires the admin password and can preview sealed letters, including their saved creation timestamps.
+Each connected device reads and writes to the same SQLite database on the server PC. New letters appear in **Your letters** with their opening dates. Letter content stays sealed for all regular visitors until that date; the `/admin` dashboard requires the admin password and can preview sealed letters, including their saved creation timestamps. Any visitor can permanently delete any letter before or after its opening date; deletion removes it for all connected devices.
 
 ## Access and privacy
 

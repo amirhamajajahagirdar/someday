@@ -118,6 +118,10 @@ export function createAppServer({ dbPath = resolve(ROOT, 'data/someday.db'), sta
           return json(res, 201, db.prepare('SELECT id, title, open_date, created_at FROM letters WHERE id=?').get(result.lastInsertRowid));
         }
         const match = url.pathname.match(/^\/api\/letters\/(\d+)$/);
+        if (match && req.method === 'DELETE') {
+          const result = db.prepare('DELETE FROM letters WHERE id=?').run(Number(match[1]));
+          return result.changes ? json(res, 200, { deleted: true }) : json(res, 404, { error: 'Letter not found.' });
+        }
         if (match && req.method === 'GET') {
           const letter = db.prepare('SELECT * FROM letters WHERE id=?').get(Number(match[1]));
           if (!letter) return json(res, 404, { error: 'Letter not found.' });

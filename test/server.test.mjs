@@ -4,6 +4,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { scryptSync } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { createAppServer, validateLetter } from '../server.mjs';
 
 test('validates letter title, message, and a future opening date', () => {
@@ -49,4 +50,10 @@ test('sets up SQLite, seals letters until their date, and lets the admin preview
   assert.ok(admin[0].created_at);
   await fetch(`${base}/api/admin/logout`, { method: 'POST', headers: { cookie } });
   assert.equal((await fetch(`${base}/api/admin/letters`, { headers: { cookie } })).status, 401);
+  assert.equal((await fetch(`${base}/api/letters/${created.id}`, { method: 'DELETE' })).status, 200);
+  const db = new DatabaseSync(join(dir, 'data', 'test.db'));
+  const past = db.prepare('INSERT INTO letters(title, body, open_date, created_at) VALUES(?,?,?,?)').run('Already opened', 'Past letter.', '2000-01-01', new Date().toISOString());
+  db.close();
+  assert.equal((await fetch(`${base}/api/letters/${past.lastInsertRowid}`, { method: 'DELETE' })).status, 200);
+  assert.equal((await fetch(`${base}/api/letters/${past.lastInsertRowid}`)).status, 404);
 });

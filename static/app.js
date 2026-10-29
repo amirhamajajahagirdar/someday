@@ -4,6 +4,19 @@ const dateAt = (months) => { const d = new Date(); d.setMonth(d.getMonth() + mon
 const esc = value => String(value).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 const formatDate = value => new Intl.DateTimeFormat(undefined, { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'UTC' }).format(new Date(`${value}T00:00:00Z`));
 const isOpen = letter => letter.open_date <= new Date().toISOString().slice(0, 10);
+function bindDeleteButtons(afterDelete) {
+  app.querySelectorAll('[data-delete-letter]').forEach(button => button.addEventListener('click', async () => {
+    if (!confirm('Delete this letter permanently for everyone? This cannot be undone.')) return;
+    button.disabled = true;
+    try { await api(`/api/letters/${button.dataset.deleteLetter}`, { method: 'DELETE' }); await afterDelete(); }
+    catch (error) { showError(error.message); button.disabled = false; }
+  }));
+}
+function showError(text) {
+  let note = app.querySelector('.notice');
+  if (!note) { note = document.createElement('p'); note.className = 'notice'; note.setAttribute('role', 'alert'); app.prepend(note); }
+  note.textContent = text;
+}
 async function api(path, options = {}) {
   const res = await fetch(path, { ...options, headers: { ...(options.body ? { 'Content-Type': 'application/json' } : {}), ...options.headers } });
   const data = await res.json().catch(() => ({})); if (!res.ok) throw new Error(data.error || `Something went wrong (${res.status}).`); return data;
@@ -19,7 +32,8 @@ async function capsules() {
     document.querySelector('#nav-count').textContent = letters.length || '';
     const holder = document.querySelector('#letters'); if (!holder) return;
     if (!letters.length) { holder.innerHTML = `<section class="empty"><span class="empty-stamp">✉</span><p class="eyebrow">A blank page, for now</p><h2>Nothing tucked away yet.</h2><p>Your future self is out there. Leave them a note to find when the time is right.</p><a class="text-link" href="/write">Write your first letter →</a></section>`; return; }
-    holder.innerHTML = letters.map(letter => `<article class="letter-card ${isOpen(letter) ? 'ready' : 'sealed'}"><div class="letter-icon">${isOpen(letter) ? '✉' : '⌑'}</div><div class="letter-info"><p class="eyebrow">${isOpen(letter) ? 'Ready to read' : 'Sealed until'}</p><h2>${esc(letter.title)}</h2><p class="letter-date">Written ${formatDate(letter.created_at.slice(0, 10))} · Opens ${formatDate(letter.open_date)}</p></div>${isOpen(letter) ? `<a class="open-link" href="/letter/${letter.id}">Read letter <span>→</span></a>` : `<span class="sealed-note">Still sealed</span>`}</article>`).join('');
+    holder.innerHTML = letters.map(letter => `<article class="letter-card ${isOpen(letter) ? 'ready' : 'sealed'}"><div class="letter-icon">${isOpen(letter) ? '✉' : '⌑'}</div><div class="letter-info"><p class="eyebrow">${isOpen(letter) ? 'Ready to read' : 'Sealed until'}</p><h2>${esc(letter.title)}</h2><p class="letter-date">Written ${formatDate(letter.created_at.slice(0, 10))} · Opens ${formatDate(letter.open_date)}</p></div>${isOpen(letter) ? `<a class="open-link" href="/letter/${letter.id}">Read letter <span>→</span></a>` : `<span class="sealed-note">Still sealed</span>`}<button class="delete-letter" data-delete-letter="${letter.id}" type="button" aria-label="Delete letter">Delete</button></article>`).join('');
+    bindDeleteButtons(capsules);
   } catch (error) { document.querySelector('#letters').innerHTML = shellNotice(`${error.message} Is the Someday server running?`); }
 }
 function writePage() {
@@ -36,7 +50,7 @@ function writePage() {
 }
 async function readPage(id) {
   app.innerHTML = `<section class="reading"><p class="eyebrow">A message from an earlier you</p><div class="letter-sheet"><span class="sheet-flower">✳</span><p class="loading">Finding your letter…</p></div></section>`;
-  try { const letter = await api(`/api/letters/${id}`); app.innerHTML = `<section class="reading"><p class="eyebrow">A note shared on Someday</p><article class="letter-sheet"><span class="sheet-flower">✳</span><p class="eyebrow">Written ${formatDate(letter.created_at.slice(0, 10))} · Opens ${formatDate(letter.open_date)}</p><h1>${esc(letter.title)}</h1><div class="letter-content">${esc(letter.body)}</div><p class="letter-signoff">With care,<br>from a Someday writer</p></article><a class="text-link back-link" href="/capsules">← Back to all letters</a></section>`; }
+  try { const letter = await api(`/api/letters/${id}`); app.innerHTML = `<section class="reading"><p class="eyebrow">A note shared on Someday</p><article class="letter-sheet"><span class="sheet-flower">✳</span><p class="eyebrow">Written ${formatDate(letter.created_at.slice(0, 10))} · Opens ${formatDate(letter.open_date)}</p><h1>${esc(letter.title)}</h1><div class="letter-content">${esc(letter.body)}</div><p class="letter-signoff">With care,<br>from a Someday writer</p></article><div class="reading-actions"><a class="text-link" href="/capsules">← Back to all letters</a><button class="delete-letter" data-delete-letter="${letter.id}" type="button">Delete this letter</button></div></section>`; bindDeleteButtons(() => { location.href = '/capsules'; }); }
   catch (error) { const sealed = error.message.includes('still sealed'); app.innerHTML = `<section class="reading"><p class="eyebrow">A note shared on Someday</p><div class="letter-sheet sealed-sheet"><span class="sheet-flower">✳</span><p class="eyebrow">${sealed ? 'Sealed for later' : 'Letter unavailable'}</p><h1>${sealed ? 'Not quite time yet.' : 'We couldn’t find it.'}</h1><p>${esc(error.message)}</p><a class="text-link" href="/capsules">← Back to all letters</a></div></section>`; }
 }
 async function adminPage() {
@@ -44,7 +58,8 @@ async function adminPage() {
   try {
     const letters = await api('/api/admin/letters');
     const holder = document.querySelector('#admin-letters'); if (!holder) return;
-    holder.innerHTML = letters.length ? letters.map(letter => `<article class="admin-card"><div class="admin-row"><div><p class="eyebrow">Written ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(letter.created_at))}</p><h2>${esc(letter.title)}</h2><p class="letter-date">Opening date: ${formatDate(letter.open_date)}</p></div><a class="open-link" href="/letter/${letter.id}">View note →</a></div><div class="admin-body">${esc(letter.body)}</div></article>`).join('') : `<section class="empty"><span class="empty-stamp">✉</span><h2>No letters have been written yet.</h2><p>New letters saved on this server will appear here for every visitor.</p></section>`;
+    holder.innerHTML = letters.length ? letters.map(letter => `<article class="admin-card"><div class="admin-row"><div><p class="eyebrow">Written ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(letter.created_at))}</p><h2>${esc(letter.title)}</h2><p class="letter-date">Opening date: ${formatDate(letter.open_date)}</p></div><div class="admin-actions"><a class="open-link" href="/letter/${letter.id}">View note →</a><button class="delete-letter" data-delete-letter="${letter.id}" type="button">Delete</button></div></div><div class="admin-body">${esc(letter.body)}</div></article>`).join('') : `<section class="empty"><span class="empty-stamp">✉</span><h2>No letters have been written yet.</h2><p>New letters saved on this server will appear here for every visitor.</p></section>`;
+    bindDeleteButtons(adminPage);
     document.querySelector('.page-head').insertAdjacentHTML('beforeend', '<button class="admin-logout" id="admin-logout" type="button">Sign out</button>');
     document.querySelector('#admin-logout').addEventListener('click', async () => { await api('/api/admin/logout', { method: 'POST', body: '{}' }); adminPage(); });
   } catch (error) {
